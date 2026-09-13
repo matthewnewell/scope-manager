@@ -6,7 +6,9 @@ import ScopeItemDetailPage from './pages/ScopeItemDetailPage'
 import './App.css'
 
 /** Shared chrome for every operational page — same pattern as the sibling apps: the splash
- * page renders its own Nav directly, everything else gets it via this layout. */
+ * page renders its own Nav directly, everything else gets it via this layout. The item detail
+ * page renders its own Nav too (not wrapped here) — it needs the full-height split-pane shape
+ * for the AI chat rail, same reasoning as The Fixer's IncidentDetailPage. */
 function Layout({ children }: { children: React.ReactNode }) {
   return (
     <div className="app-layout">
@@ -21,7 +23,7 @@ export default function App() {
     <Routes>
       <Route path="/about" element={<SplashPage />} />
       <Route path="/" element={<Layout><ScopeTreePage /></Layout>} />
-      <Route path="/items/:itemId" element={<Layout><ScopeItemDetailPage /></Layout>} />
+      <Route path="/items/:itemId" element={<ScopeItemDetailPage />} />
     </Routes>
   )
 }

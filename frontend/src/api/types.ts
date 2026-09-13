@@ -36,8 +36,33 @@ export interface ScopeProgressEvent {
   created_at: string
 }
 
+export type EventKind = 'note' | 'change'
+
+export interface ScopeEvent {
+  id: string
+  scope_item_id: string
+  created_at: string
+  author: string | null
+  kind: EventKind
+  field: string | null
+  old_value: string | null
+  new_value: string | null
+  note: string | null
+}
+
 export interface ScopeItemDetail extends ScopeItem {
   ancestors: ScopeItem[]
   children: ScopeItem[]
   progress_events: ScopeProgressEvent[]
+  events: ScopeEvent[]
+}
+
+export interface ChatMessage {
+  role: 'user' | 'assistant'
+  content: string
+}
+
+export interface ChatResponse {
+  reply: string
+  error?: string
 }

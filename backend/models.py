@@ -132,6 +132,47 @@ class ScopeProgressEvent(db.Model):
         }
 
 
+class ScopeEvent(db.Model):
+    """The item's journal — separate from `ScopeProgressEvent` on purpose. ScopeProgressEvent
+    is the specific, required-note record of "how done is this" that drives `status`/
+    `percent_complete`; this is the general log of everything else worth remembering about an
+    item: auto-captured field edits (title, description, charge number, external link) and
+    freestanding manual notes (a decision, a risk, context that isn't a progress judgment
+    itself). Same shape and reasoning as The Fixer's IncidentEvent / Value Stream's MapEvent.
+    Nothing here is ever updated; "change" rows are never deleted, only manual "note" rows can
+    be removed (a typo, a wrong call)."""
+
+    __tablename__ = "scope_event"
+
+    id = db.Column(db.String(36), primary_key=True, default=_uuid)
+    scope_item_id = db.Column(db.String(36), db.ForeignKey("scope_item.id"), nullable=False, index=True)
+    created_at = db.Column(db.DateTime, default=_now, nullable=False, index=True)
+    author = db.Column(db.String(120), nullable=True)
+
+    kind = db.Column(db.String(20), nullable=False, default="note")  # "note" | "change"
+
+    # kind="change" only — the auto-captured diff, already formatted for display.
+    field = db.Column(db.String(60), nullable=True)
+    old_value = db.Column(db.Text, nullable=True)
+    new_value = db.Column(db.Text, nullable=True)
+
+    # kind="note" only.
+    note = db.Column(db.Text, nullable=True)
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "scope_item_id": self.scope_item_id,
+            "created_at": self.created_at.isoformat(),
+            "author": self.author,
+            "kind": self.kind,
+            "field": self.field,
+            "old_value": self.old_value,
+            "new_value": self.new_value,
+            "note": self.note,
+        }
+
+
 def ancestor_chain(item: ScopeItem) -> list[ScopeItem]:
     """Root-to-self chain for the breadcrumb — same cycle guard as Org Charts' version, so a
     corrupted parent_id can never hang the app in a loop."""

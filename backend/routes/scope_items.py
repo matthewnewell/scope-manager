@@ -1,7 +1,8 @@
 from flask import Blueprint, jsonify, request
 
+import journal
 from db import db
-from models import STATUSES, ScopeItem, ScopeProgressEvent, ancestor_chain
+from models import STATUSES, ScopeEvent, ScopeItem, ScopeProgressEvent, ancestor_chain
 
 bp = Blueprint("scope_items", __name__, url_prefix="/api/scope-items")
 
@@ -37,6 +38,7 @@ def get_scope_item(item_id):
         "ancestors": [a.to_dict(include_counts=False) for a in ancestor_chain(item)[:-1]],
         "children": [c.to_dict() for c in children],
         "progress_events": [e.to_dict() for e in item.progress_events],
+        "events": [e.to_dict() for e in ScopeEvent.query.filter_by(scope_item_id=item.id).order_by(ScopeEvent.created_at.desc(), ScopeEvent.kind.asc(), ScopeEvent.id.asc()).all()],
     })
 
 
@@ -79,15 +81,24 @@ def create_scope_item():
     return jsonify(item.to_dict()), 201
 
 
+def _journal_snapshot(item: ScopeItem) -> dict:
+    return {f: getattr(item, f) for f in journal.SCOPE_ITEM_FIELDS}
+
+
 @bp.put("/<item_id>")
 def update_scope_item(item_id):
     """Static fields only — title, description, charge number, external link. Status and
     percent never change here; that's what POST /<id>/progress is for. `parent_id` is
     deliberately not editable after creation in v1 — reparenting needs the same cycle guard
     Org Charts' manager_id update has, worth adding once someone actually needs to move a
-    scope item, not before."""
+    scope item, not before.
+
+    Every changed field is auto-logged to the journal; an optional `journal_note` (plus
+    `author`) is recorded alongside it in the same save — see journal.py."""
     item = ScopeItem.query.get_or_404(item_id)
     body = request.get_json(force=True) or {}
+    before = _journal_snapshot(item)
+
     if "title" in body:
         if not (body.get("title") or "").strip():
             return jsonify({"error": "title is required"}), 400
@@ -100,6 +111,12 @@ def update_scope_item(item_id):
         item.charge_number = (body.get("charge_number") or "").strip() or None
     if "external_ref" in body:
         item.external_ref = (body.get("external_ref") or "").strip() or None
+
+    journal.record_changes(
+        item.id, before, _journal_snapshot(item),
+        author=body.get("author"), note=body.get("journal_note"),
+    )
+
     db.session.commit()
     return jsonify(item.to_dict())
 
@@ -145,3 +162,49 @@ def add_progress(item_id):
     db.session.add(event)
     db.session.commit()
     return jsonify(item.to_dict()), 201
+
+
+# ── Journal ──────────────────────────────────────────────────────────────────────────────────
+
+@bp.get("/<item_id>/events")
+def list_events(item_id):
+    """The item's journal, newest first (within one save, changes before the note)."""
+    ScopeItem.query.get_or_404(item_id)
+    events = (
+        ScopeEvent.query.filter_by(scope_item_id=item_id)
+        .order_by(ScopeEvent.created_at.desc(), ScopeEvent.kind.asc(), ScopeEvent.id.asc())
+        .all()
+    )
+    return jsonify([e.to_dict() for e in events])
+
+
+@bp.post("/<item_id>/events")
+def add_event(item_id):
+    """Add a manual note — a decision, a risk, context that isn't itself a progress judgment.
+    Auto-captured 'change' events are written by the PUT route above, not here."""
+    ScopeItem.query.get_or_404(item_id)
+    body = request.get_json(force=True) or {}
+    note = (body.get("note") or "").strip()
+    if not note:
+        return jsonify({"error": "note is required"}), 400
+
+    ev = ScopeEvent(
+        scope_item_id=item_id,
+        kind="note",
+        note=note,
+        author=(body.get("author") or "").strip() or None,
+    )
+    db.session.add(ev)
+    db.session.commit()
+    return jsonify(ev.to_dict()), 201
+
+
+@bp.delete("/events/<event_id>")
+def delete_event(event_id):
+    """Remove a manual note (a typo, a wrong call). 'change' history is permanent."""
+    ev = ScopeEvent.query.get_or_404(event_id)
+    if ev.kind != "note":
+        return jsonify({"error": "only manual notes can be deleted; change history is permanent"}), 400
+    db.session.delete(ev)
+    db.session.commit()
+    return "", 204

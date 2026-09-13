@@ -2,7 +2,9 @@ import os
 
 from flask import Flask, send_from_directory
 
+import ai_client
 from db import init_db
+from routes.ai import bp as ai_bp
 from routes.scope_items import bp as scope_items_bp
 from seed import seed_if_empty
 
@@ -15,13 +17,14 @@ def create_app():
 
     init_db(app)
     app.register_blueprint(scope_items_bp)
+    app.register_blueprint(ai_bp)
 
     with app.app_context():
         seed_if_empty()
 
     @app.get("/api/health")
     def health():
-        return {"status": "ok"}
+        return {"status": "ok", "ai_configured": ai_client.is_configured()}
 
     # Serve the built frontend (Vite `dist/`) in production. In dev, the Vite dev server
     # handles the UI and proxies /api/* to this Flask process instead.

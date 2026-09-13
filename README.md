@@ -60,6 +60,11 @@ npm run dev                        # :5183, proxies /api to :8097
 - **ScopeProgressEvent** — one append-only row per judgment call: `status`, `percent_complete`,
   a required `note`, `author`, `created_at`. A `ScopeItem`'s current status/percent is always
   its latest event; an item with none yet is honestly "not started, 0%."
+- **ScopeEvent** — the item's journal, separate from `ScopeProgressEvent` on purpose: this is
+  the general log (auto-captured field edits — title, description, charge number, external
+  link — plus freestanding manual notes), not the specific required-note "how done is this"
+  record that drives status/percent. Same shape as The Fixer's `IncidentEvent`. "Change" rows
+  are permanent; manual "note" rows can be deleted.
 - An item can't be deleted while it still has children (move or remove them first).
   `parent_id` isn't editable after creation in v1 — reparenting would need the same cycle guard
   Org Charts' `manager_id` update has, worth adding once something actually needs to move a
@@ -70,9 +75,19 @@ npm run dev                        # :5183, proxies /api to :8097
 `GET /api/scope-items?project=X&charge_number=Y` — current status/percent (and everything else)
 for whatever matches. That's the entire contract between the two apps; Reckon never writes here.
 
+## AI chat
+
+A persistent pane scoped to one scope item — ported ~verbatim from The Fixer's/Value Stream's
+`ai_client.py` (Claude/Gemini/Ollama, off by default via `AI_PROVIDER=none`). Helps write a
+clearer title/description and a progress note that actually says what changed, and will push
+back if a recorded percent doesn't seem to match its own note. It never invents or suggests a
+status/percent itself, and never treats a linked GitHub/Azure Boards issue as a progress source
+— consistent with the "judgment, not automation" rule the whole app is built around.
+
 ## Status
 
-v1 — tree view + item detail, add/edit/delete, recording progress updates with history. Seeded
-with a small demo WBS (3 top-level items on one project, one nested two levels deep, one item
-deliberately left with no progress recorded to show the honest empty state) plus a single item
-on a second project so the project switcher isn't a dead end.
+v1 — tree view + item detail, add/edit/delete, recording progress updates with history, a
+journal (auto-captured edits + manual notes), and an optional AI chat pane. Seeded with a small
+demo WBS (3 top-level items on one project, one nested two levels deep, one item deliberately
+left with no progress recorded to show the honest empty state) plus a single item on a second
+project so the project switcher isn't a dead end.
