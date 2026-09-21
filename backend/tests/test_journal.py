@@ -25,7 +25,7 @@ def client():
 
 
 def _design_item(client):
-    items = client.get("/api/scope-items?project=Demo: Bracket Assembly Program").get_json()
+    items = client.get("/api/scope-items?project=Bracket Assembly Program").get_json()
     return next(i for i in items if i["title"] == "Design Definition")
 
 

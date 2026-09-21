@@ -8,8 +8,8 @@ project/portfolio names Value Stream, Conway's Depot, DWMP, and The Fixer alread
 from db import db
 from models import ScopeItem, ScopeProgressEvent
 
-_BKT = "Demo: Bracket Assembly Program"
-_NAC = "Demo: Nacelle Fairing Retrofit"
+_BKT = "Bracket Assembly Program"
+_NAC = "Nacelle Fairing Retrofit"
 _PORTFOLIO = "Industrial Programs"
 
 

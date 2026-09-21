@@ -25,13 +25,13 @@ def client():
 
 
 def _bracket_items(client):
-    return client.get("/api/scope-items?project=Demo: Bracket Assembly Program").get_json()
+    return client.get("/api/scope-items?project=Bracket Assembly Program").get_json()
 
 
 def test_list_filters_by_project(client):
     items = _bracket_items(client)
     assert len(items) == 5  # 3 top-level + 2 children of Build & Integration
-    assert all(i["project"] == "Demo: Bracket Assembly Program" for i in items)
+    assert all(i["project"] == "Bracket Assembly Program" for i in items)
 
 
 def test_item_with_no_progress_events_is_honestly_not_started(client):
@@ -72,7 +72,7 @@ def test_create_child_item(client):
     build = next(i for i in items if i["title"] == "Build & Integration")
 
     created = client.post("/api/scope-items", json={
-        "project": "Demo: Bracket Assembly Program",
+        "project": "Bracket Assembly Program",
         "title": "Paint & Finish",
         "parent_id": build["id"],
     })
@@ -146,6 +146,6 @@ def test_projects_endpoint_lists_both_seeded_projects(client):
     res = client.get("/api/scope-items/projects")
     assert res.status_code == 200
     assert set(res.get_json()) == {
-        "Demo: Bracket Assembly Program",
-        "Demo: Nacelle Fairing Retrofit",
+        "Bracket Assembly Program",
+        "Nacelle Fairing Retrofit",
     }
