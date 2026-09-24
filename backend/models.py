@@ -19,6 +19,13 @@ given project's scope actually calls for, in whatever vocabulary fits it (a manu
 doesn't naturally speak "epic/story"). Same "plain self-reference, no rigid schema" choice Org
 Charts made for reporting lines.
 
+**This tree is the project's WBS, and this app owns it.** Each item carries a WBS `code`
+("1", "1.2", "1.2.3"), unique within its project; the code's dots mirror the tree. Good Plan
+budgets against the tree's leaves (work packages: labor, materials and ODCs each land on exactly
+one), Reckon lines budget, progress and S4 actuals up per element. Scope never holds dollars and
+Good Plan never edits scope. Projects are keyed by their Conway's Depot id (`depot_project_id`);
+`project` is the name, a display copy frozen at creation like every sibling app's.
+
 **Percent complete is always a person's judgment call — never computed.** Even where a
 `ScopeItem` has a GitHub/Azure Boards link, a closed-issue count is not the same thing as real
 progress (the same "no fake precision" rule DWMP applies to dwell time and Good Plan applies to
@@ -44,11 +51,15 @@ class ScopeItem(db.Model):
     __tablename__ = "scope_item"
 
     id = db.Column(db.String(36), primary_key=True, default=_uuid)
-    project = db.Column(db.String(200), nullable=False, index=True)
+    depot_project_id = db.Column(db.String(36), nullable=True, index=True)
+    project = db.Column(db.String(200), nullable=False, index=True)  # display copy of the name
     portfolio = db.Column(db.String(200), nullable=True)
     title = db.Column(db.String(300), nullable=False)
     description = db.Column(db.Text, nullable=True)
     parent_id = db.Column(db.String(36), db.ForeignKey("scope_item.id"), nullable=True, index=True)
+    # WBS code, unique within the project ("1.2.3"). Assigned from the parent's code when an
+    # item is created without one.
+    code = db.Column(db.String(30), nullable=True)
     # The join key Reckon needs to line this item's earned value up against S4 actuals (ACWP).
     # Nullable — plenty of scope items (a container/epic-ish grouping node, say) won't carry a
     # charge number of their own; only the leaf work actually charged against one does.
@@ -85,6 +96,8 @@ class ScopeItem(db.Model):
         latest = self.latest_progress
         d = {
             "id": self.id,
+            "depot_project_id": self.depot_project_id,
+            "code": self.code,
             "project": self.project,
             "portfolio": self.portfolio,
             "title": self.title,
@@ -185,3 +198,21 @@ def ancestor_chain(item: ScopeItem) -> list[ScopeItem]:
         node = node.parent
     chain.reverse()
     return chain
+
+
+def code_key(code: str | None) -> tuple:
+    """Sort key for WBS codes: 1.2 before 1.10, and uncoded items last."""
+    if not code:
+        return (1, ())
+    return (0, tuple(int(p) if p.isdigit() else p for p in code.split(".")))
+
+
+def next_child_code(parent: ScopeItem | None, siblings: list[ScopeItem]) -> str:
+    """The next free code under `parent` (or at the top level): one past the highest sibling."""
+    prefix = f"{parent.code}." if parent is not None and parent.code else ""
+    used = []
+    for s in siblings:
+        tail = (s.code or "")[len(prefix):] if (s.code or "").startswith(prefix) else ""
+        if tail.isdigit():
+            used.append(int(tail))
+    return f"{prefix}{max(used, default=0) + 1}"

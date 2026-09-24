@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { useCreateScopeItem, useProjects, useScopeItems } from '../api/hooks'
-import type { ScopeItem } from '../api/types'
+import type { ProjectOption, ScopeItem } from '../api/types'
 import { getAuthor, setAuthor } from '../lib/author'
 import StatusPill from '../components/StatusPill'
 import './ScopeTreePage.css'
@@ -18,39 +18,105 @@ function groupByParent(items: ScopeItem[]): Map<string | null, ScopeItem[]> {
   return map
 }
 
-export default function ScopeTreePage() {
-  const { data: projects } = useProjects()
-  const [project, setProject] = useState<string | undefined>(undefined)
+const PROJECT_KEY = 'sm:project'
+const GOOD_PLAN_URL = 'http://localhost:5178'
+
+/** The project whose WBS is on screen: a Depot link's `?project=` (its Depot id) wins, then the
+ * last one looked at, then the first project with scope. */
+function useProjectChoice(options: ProjectOption[] | undefined) {
+  const [params, setParams] = useSearchParams()
+  const fromUrl = params.get('project')
+  let remembered: string | null = null
+  try {
+    remembered = window.localStorage.getItem(PROJECT_KEY)
+  } catch {
+    /* not remembered */
+  }
+  const known = (id: string | null) => !!id && !!options?.some((o) => o.id === id)
+  const projectId = known(fromUrl) ? fromUrl! : known(remembered) ? remembered! : options?.[0]?.id
 
   useEffect(() => {
-    if (!project && projects && projects.length > 0) setProject(projects[0])
-  }, [projects, project])
+    if (!projectId) return
+    try {
+      window.localStorage.setItem(PROJECT_KEY, projectId)
+    } catch {
+      /* not remembered */
+    }
+  }, [projectId])
 
-  const { data: items, isLoading } = useScopeItems(project)
+  const choose = (id: string) =>
+    setParams(
+      (prev) => {
+        const next = new URLSearchParams(prev)
+        next.set('project', id)
+        return next
+      },
+      { replace: true },
+    )
+  return [projectId, choose] as const
+}
+
+export default function ScopeTreePage() {
+  const { data } = useProjects()
+  const options = data?.projects
+  const [projectId, setProjectId] = useProjectChoice(options)
+  const project = options?.find((o) => o.id === projectId)
+
+  const { data: items, isLoading } = useScopeItems(projectId)
   const byParent = items ? groupByParent(items) : new Map<string | null, ScopeItem[]>()
   const roots = byParent.get(null) ?? []
+  const withScope = options?.filter((o) => o.item_count > 0) ?? []
+  const without = options?.filter((o) => o.item_count === 0) ?? []
 
   return (
     <div className="scope-tree-page">
       <header className="scope-tree-page__header">
-        <h1 className="scope-tree-page__title">Scope</h1>
-        {projects && projects.length > 1 && (
+        <h1 className="scope-tree-page__title">Work breakdown</h1>
+        {options && options.length > 0 && (
           <select
             className="scope-tree-page__project"
-            value={project}
-            onChange={(e) => setProject(e.target.value)}
+            value={projectId}
+            onChange={(e) => setProjectId(e.target.value)}
           >
-            {projects.map((p) => (
-              <option key={p} value={p}>{p}</option>
-            ))}
+            <optgroup label="With a WBS">
+              {withScope.map((p) => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </optgroup>
+            <optgroup label="No WBS yet">
+              {without.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                  {p.phase === 'pursuit' ? ' (pursuit)' : ''}
+                </option>
+              ))}
+            </optgroup>
           </select>
         )}
       </header>
+      <p className="scope-tree-page__lede">
+        The project's WBS. Good Plan budgets labor, materials and ODCs against its work packages (the
+        leaves), and progress recorded here is what earns that budget.
+      </p>
+      {data && !data.depot_reachable && (
+        <p className="scope-tree-page__loading">Conway's Depot isn't reachable, so only projects that already have scope are listed.</p>
+      )}
 
       {isLoading && <p className="scope-tree-page__loading">Loading…</p>}
 
-      {!isLoading && items && items.length === 0 && (
-        <p className="scope-tree-page__loading">No scope items yet for this project.</p>
+      {!isLoading && items && items.length === 0 && project && (
+        <div className="scope-tree-page__empty">
+          {project.phase === 'pursuit' ? (
+            <>
+              <strong>{project.name} is still a pursuit, so it has no WBS here yet.</strong> Its draft WBS
+              lives in Good Plan, where the estimate is built on it. Once the work is awarded, send the
+              draft over from Good Plan, or start one below.{' '}
+              <a href={GOOD_PLAN_URL} target="_blank" rel="noreferrer">Open Good Plan</a>
+            </>
+          ) : (
+            <>No WBS yet for {project.name}. Start with its top-level elements.</>
+          )}
+        </div>
       )}
 
       {!isLoading && project && (
@@ -60,7 +126,7 @@ export default function ScopeTreePage() {
               <ScopeNode key={item.id} item={item} byParent={byParent} />
             ))}
           </ul>
-          <AddItemForm project={project} />
+          <AddItemForm projectId={project.id} project={project.name} portfolio={project.portfolio} />
         </>
       )}
     </div>
@@ -87,7 +153,9 @@ function ScopeNode({ item, byParent }: { item: ScopeItem; byParent: Map<string |
           <span className="scope-row__toggle-spacer" />
         )}
         <Link to={`/items/${item.id}`} className="scope-row__link">
+          {item.code && <span className="scope-row__code">{item.code}</span>}
           <span className="scope-row__title">{item.title}</span>
+          {kids.length === 0 && <span className="scope-row__wp" title="A work package: budget in Good Plan sits here">WP</span>}
           <StatusPill status={item.status} />
           <span className="scope-row__percent">{item.percent_complete}%</span>
           {item.charge_number && <span className="scope-row__charge">{item.charge_number}</span>}
@@ -105,7 +173,7 @@ function ScopeNode({ item, byParent }: { item: ScopeItem; byParent: Map<string |
   )
 }
 
-function AddItemForm({ project }: { project: string }) {
+function AddItemForm({ projectId, project, portfolio }: { projectId: string; project: string; portfolio: string | null }) {
   const createItem = useCreateScopeItem()
   const [open, setOpen] = useState(false)
   const [title, setTitle] = useState('')
@@ -116,7 +184,10 @@ function AddItemForm({ project }: { project: string }) {
     if (!title.trim()) return
     setAuthor(author)
     createItem.mutate(
-      { project, title: title.trim(), charge_number: chargeNumber.trim() || undefined, created_by: author.trim() || undefined },
+      {
+        project_id: projectId, project, portfolio: portfolio ?? undefined, title: title.trim(),
+        charge_number: chargeNumber.trim() || undefined, created_by: author.trim() || undefined,
+      },
       { onSuccess: () => { setTitle(''); setChargeNumber(''); setOpen(false) } },
     )
   }
@@ -124,7 +195,7 @@ function AddItemForm({ project }: { project: string }) {
   if (!open) {
     return (
       <button className="sm-btn sm-btn--ghost scope-tree-page__add-btn" onClick={() => setOpen(true)}>
-        + Add top-level scope item
+        + Add top-level element
       </button>
     )
   }

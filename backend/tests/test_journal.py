@@ -25,22 +25,22 @@ def client():
 
 
 def _design_item(client):
-    items = client.get("/api/scope-items?project=Bracket Assembly Program").get_json()
-    return next(i for i in items if i["title"] == "Design Definition")
+    items = client.get("/api/scope-items?project_id=ff5bfe0b-7b18-4337-a464-6517c6f6c13b").get_json()
+    return next(i for i in items if i["code"] == "1.2")
 
 
 def test_editing_a_field_auto_logs_a_change_event(client):
     item = _design_item(client)
     res = client.put(f"/api/scope-items/{item['id']}", json={
-        "title": "Design Definition (Updated)", "author": "Sam Ortiz (PM)",
+        "title": "Systems Engineering (Updated)", "author": "Sam Ortiz (PM)",
     })
     assert res.status_code == 200
 
     events = client.get(f"/api/scope-items/{item['id']}/events").get_json()
     change = next(e for e in events if e["kind"] == "change")
     assert change["field"] == "title"
-    assert change["old_value"] == "Design Definition"
-    assert change["new_value"] == "Design Definition (Updated)"
+    assert change["old_value"] == "Systems Engineering"
+    assert change["new_value"] == "Systems Engineering (Updated)"
     assert change["author"] == "Sam Ortiz (PM)"
 
 

@@ -1,21 +1,23 @@
 from flask import Blueprint, jsonify, request
 
+import depot_client
 import journal
 from db import db
-from models import STATUSES, ScopeEvent, ScopeItem, ScopeProgressEvent, ancestor_chain
+from models import STATUSES, ScopeEvent, ScopeItem, ScopeProgressEvent, ancestor_chain, code_key, next_child_code
 
 bp = Blueprint("scope_items", __name__, url_prefix="/api/scope-items")
 
 
 @bp.get("")
 def list_scope_items():
-    """Flat list, filterable by `project`, `portfolio`, and `charge_number` — the same query
-    shape Reckon will call (`?project=X&charge_number=Y`) to read a charge number's current
-    earned-value signal. The frontend also uses this (unfiltered by charge_number, one project
-    at a time) and builds the tree client-side from `parent_id` — small enough data per
-    project that a lazy per-node fetch (Org Charts' approach) isn't worth the extra round trips
-    here."""
+    """Flat list in WBS-code order, filterable by `project_id` (a Depot project id), `project`
+    (name, kept for older callers), `portfolio`, and `charge_number` — the query shape Reckon
+    will call to read a charge number's current earned-value signal. The frontend fetches one
+    project at a time and builds the tree client-side from `parent_id`."""
     query = ScopeItem.query
+    project_id = request.args.get("project_id")
+    if project_id:
+        query = query.filter(ScopeItem.depot_project_id == project_id)
     project = request.args.get("project")
     if project:
         query = query.filter(ScopeItem.project == project)
@@ -25,14 +27,14 @@ def list_scope_items():
     charge_number = request.args.get("charge_number")
     if charge_number:
         query = query.filter(ScopeItem.charge_number == charge_number)
-    items = query.order_by(ScopeItem.created_at).all()
+    items = sorted(query.all(), key=lambda i: (code_key(i.code), i.created_at))
     return jsonify([i.to_dict() for i in items])
 
 
 @bp.get("/<item_id>")
 def get_scope_item(item_id):
     item = ScopeItem.query.get_or_404(item_id)
-    children = sorted(item.children, key=lambda c: c.created_at)
+    children = sorted(item.children, key=lambda c: (code_key(c.code), c.created_at))
     return jsonify({
         **item.to_dict(),
         "ancestors": [a.to_dict(include_counts=False) for a in ancestor_chain(item)[:-1]],
@@ -44,19 +46,54 @@ def get_scope_item(item_id):
 
 @bp.get("/projects")
 def list_projects():
-    rows = db.session.query(ScopeItem.project).distinct().all()
-    return jsonify(sorted({r[0] for r in rows if r[0]}))
+    """Projects for the picker: every Depot project (so one with no scope yet can get a WBS),
+    each with how many scope items it has. Awarded work first; pursuits carry their phase so the
+    page can say their draft WBS lives in Good Plan until award. If the Depot is down, the
+    projects that already have scope here."""
+    counts: dict[str, int] = {}
+    names: dict[str, str] = {}
+    for item in ScopeItem.query.all():
+        if item.depot_project_id:
+            counts[item.depot_project_id] = counts.get(item.depot_project_id, 0) + 1
+            names[item.depot_project_id] = item.project
+    depot = depot_client.fetch_projects()
+    if depot is None:
+        rows = [{"id": pid, "name": names[pid], "phase": None, "portfolio": None, "item_count": n} for pid, n in counts.items()]
+    else:
+        rows = [
+            {
+                "id": p["id"], "name": p["name"], "phase": p.get("phase"),
+                "portfolio": p.get("portfolio_name"), "item_count": counts.get(p["id"], 0),
+            }
+            for p in depot
+        ]
+    rows.sort(key=lambda r: (r["item_count"] == 0, r["phase"] == "pursuit", r["name"]))
+    return jsonify({"projects": rows, "depot_reachable": depot is not None})
 
 
 def _validate_create(body: dict) -> tuple[dict, int] | None:
     if not (body.get("title") or "").strip():
         return {"error": "title is required"}, 400
+    if not (body.get("project_id") or "").strip():
+        return {"error": "project_id (the Depot project id) is required"}, 400
     if not (body.get("project") or "").strip():
-        return {"error": "project is required"}, 400
+        return {"error": "project (its name) is required"}, 400
     parent_id = body.get("parent_id")
-    if parent_id and ScopeItem.query.get(parent_id) is None:
-        return {"error": "parent_id does not refer to a real scope item"}, 400
+    if parent_id:
+        parent = db.session.get(ScopeItem, parent_id)
+        if parent is None:
+            return {"error": "parent_id does not refer to a real scope item"}, 400
+        if parent.depot_project_id != body["project_id"]:
+            return {"error": "parent_id belongs to a different project"}, 400
+    code = (body.get("code") or "").strip()
+    if code and _code_taken(body["project_id"], code):
+        return {"error": f"WBS {code} is already used in this project"}, 400
     return None
+
+
+def _code_taken(project_id: str, code: str, except_id: str | None = None) -> bool:
+    q = ScopeItem.query.filter_by(depot_project_id=project_id, code=code)
+    return any(i.id != except_id for i in q.all())
 
 
 @bp.post("")
@@ -66,7 +103,11 @@ def create_scope_item():
     if err:
         return jsonify(err[0]), err[1]
 
+    parent = db.session.get(ScopeItem, body["parent_id"]) if body.get("parent_id") else None
+    siblings = ScopeItem.query.filter_by(depot_project_id=body["project_id"], parent_id=parent.id if parent else None).all()
     item = ScopeItem(
+        depot_project_id=body["project_id"].strip(),
+        code=(body.get("code") or "").strip() or next_child_code(parent, siblings),
         project=body["project"].strip(),
         portfolio=(body.get("portfolio") or "").strip() or None,
         title=body["title"].strip(),
@@ -107,6 +148,13 @@ def update_scope_item(item_id):
         item.description = (body.get("description") or "").strip() or None
     if "portfolio" in body:
         item.portfolio = (body.get("portfolio") or "").strip() or None
+    if "code" in body:
+        code = (body.get("code") or "").strip()
+        if not code:
+            return jsonify({"error": "a WBS code can't be blank"}), 400
+        if _code_taken(item.depot_project_id, code, item.id):
+            return jsonify({"error": f"WBS {code} is already used in this project"}), 400
+        item.code = code
     if "charge_number" in body:
         item.charge_number = (body.get("charge_number") or "").strip() or None
     if "external_ref" in body:

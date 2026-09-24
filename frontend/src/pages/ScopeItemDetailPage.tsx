@@ -27,6 +27,7 @@ export default function ScopeItemDetailPage() {
   const [chatOpen, setChatOpen] = useState(false)
 
   const [editing, setEditing] = useState(false)
+  const [code, setCode] = useState('')
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [chargeNumber, setChargeNumber] = useState('')
@@ -36,6 +37,7 @@ export default function ScopeItemDetailPage() {
   if (isLoading || !item) return <div className="scope-detail__loading">Loading…</div>
 
   function startEditing() {
+    setCode(item!.code ?? '')
     setTitle(item!.title)
     setDescription(item!.description ?? '')
     setChargeNumber(item!.charge_number ?? '')
@@ -47,6 +49,7 @@ export default function ScopeItemDetailPage() {
     setAuthor(author)
     updateItem.mutate(
       {
+        ...(code.trim() && code.trim() !== item!.code ? { code: code.trim() } : {}),
         title: title.trim(),
         description: description.trim() || undefined,
         charge_number: chargeNumber.trim() || undefined,
@@ -70,10 +73,10 @@ export default function ScopeItemDetailPage() {
         <div className="scope-detail">
           <div className="scope-detail__inner">
             <nav className="scope-detail__breadcrumb">
-              <Link to="/">{item.project}</Link>
+              <Link to={item.depot_project_id ? `/?project=${item.depot_project_id}` : '/'}>{item.project}</Link>
               {item.ancestors.map((a) => (
                 <span key={a.id}>
-                  {' '}/ <Link to={`/items/${a.id}`}>{a.title}</Link>
+                  {' '}/ <Link to={`/items/${a.id}`}>{a.code ? `${a.code} ` : ''}{a.title}</Link>
                 </span>
               ))}
               {' '}/ <span className="scope-detail__breadcrumb-current">{item.title}</span>
@@ -83,7 +86,10 @@ export default function ScopeItemDetailPage() {
               {!editing ? (
                 <>
                   <div className="scope-detail__title-row">
-                    <h1 className="scope-detail__title">{item.title}</h1>
+                    <h1 className="scope-detail__title">
+                      {item.code && <span className="scope-detail__code">{item.code}</span>}
+                      {item.title}
+                    </h1>
                     <button className="sm-btn sm-btn--ghost" onClick={startEditing}>✎ Edit</button>
                   </div>
                   {item.description && <p className="scope-detail__desc">{item.description}</p>}
@@ -106,7 +112,10 @@ export default function ScopeItemDetailPage() {
                 </>
               ) : (
                 <div className="scope-detail__edit-form">
-                  <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Title" />
+                  <div className="scope-detail__edit-row">
+                    <input className="scope-detail__code-input" value={code} onChange={(e) => setCode(e.target.value)} placeholder="WBS code" aria-label="WBS code" />
+                    <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Title" />
+                  </div>
                   <textarea
                     rows={2}
                     value={description}
@@ -193,7 +202,7 @@ export default function ScopeItemDetailPage() {
                   ))}
                 </ul>
               )}
-              <AddChildForm project={item.project} parentId={item.id} />
+              <AddChildForm projectId={item.depot_project_id ?? ''} project={item.project} parentId={item.id} />
             </section>
 
             <section className="scope-detail__section">
@@ -284,7 +293,7 @@ function ProgressForm({ itemId }: { itemId: string }) {
   )
 }
 
-function AddChildForm({ project, parentId }: { project: string; parentId: string }) {
+function AddChildForm({ projectId, project, parentId }: { projectId: string; project: string; parentId: string }) {
   const createItem = useCreateScopeItem()
   const [open, setOpen] = useState(false)
   const [title, setTitle] = useState('')
@@ -293,7 +302,7 @@ function AddChildForm({ project, parentId }: { project: string; parentId: string
   function submit() {
     if (!title.trim()) return
     createItem.mutate(
-      { project, parent_id: parentId, title: title.trim(), charge_number: chargeNumber.trim() || undefined },
+      { project_id: projectId, project, parent_id: parentId, title: title.trim(), charge_number: chargeNumber.trim() || undefined },
       { onSuccess: () => { setTitle(''); setChargeNumber(''); setOpen(false) } },
     )
   }

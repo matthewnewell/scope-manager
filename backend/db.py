@@ -31,7 +31,10 @@ def _set_sqlite_pragma(dbapi_conn, connection_record):
     cursor.close()
 
 
-_MIGRATIONS: list[tuple[str, str, str]] = []
+_MIGRATIONS: list[tuple[str, str, str]] = [
+    ("scope_item", "depot_project_id", "ALTER TABLE scope_item ADD COLUMN depot_project_id VARCHAR(36)"),
+    ("scope_item", "code", "ALTER TABLE scope_item ADD COLUMN code VARCHAR(30)"),
+]
 
 
 def _run_migrations(app):

@@ -10,6 +10,9 @@ export const STATUS_LABEL: Record<ScopeStatus, string> = {
 
 export interface ScopeItem {
   id: string
+  depot_project_id: string | null
+  /** WBS code, unique within the project ("1.2.3"). */
+  code: string | null
   project: string
   portfolio: string | null
   title: string
@@ -55,6 +58,15 @@ export interface ScopeItemDetail extends ScopeItem {
   children: ScopeItem[]
   progress_events: ScopeProgressEvent[]
   events: ScopeEvent[]
+}
+
+/** A Depot project, for the picker. `item_count` 0 = no WBS here yet. */
+export interface ProjectOption {
+  id: string
+  name: string
+  phase: string | null
+  portfolio: string | null
+  item_count: number
 }
 
 export interface ChatMessage {

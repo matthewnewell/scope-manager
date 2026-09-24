@@ -13,6 +13,7 @@ from models import ScopeEvent
 
 # field name -> label shown in the feed
 SCOPE_ITEM_FIELDS = {
+    "code": "WBS code",
     "title": "title",
     "description": "description",
     "portfolio": "portfolio",
